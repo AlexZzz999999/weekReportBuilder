@@ -46,8 +46,7 @@ test("ships finished metadata and removes the starter preview", async () => {
   ]);
 
   assert.match(page, /showDirectoryPicker/);
-  assert.match(page, /indexedDB/);
-  assert.match(page, /setDirectoryStatus\("required"\)/);
+  assert.doesNotMatch(page, /indexedDB|正在检查目录能力/);
   assert.match(page, /周报工坊数据\.json/);
   assert.match(page, /使用前，请先选择数据目录/);
   assert.match(page, /工作进展概览/);

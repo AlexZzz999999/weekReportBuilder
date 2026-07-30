@@ -54,9 +54,6 @@ type DirectoryPickerWindow = Window & {
 
 const LEGACY_STORAGE_KEY = "weekly-report-workshop-v1";
 const DATA_FILE_NAME = "周报工坊数据.json";
-const DIRECTORY_DB_NAME = "weekly-report-workshop-directory";
-const DIRECTORY_STORE_NAME = "handles";
-const DIRECTORY_HANDLE_KEY = "report-data-directory";
 const STATUS_OPTIONS = ["未开始", "进行中", "已完成", "有风险", "已延期", "待确认"];
 const SECTION_COLOR_PRESETS = [
   "#e96d62",
@@ -86,46 +83,6 @@ function createTint(hex: string) {
       .padStart(2, "0"),
   );
   return `#${tinted.join("")}`;
-}
-
-function openDirectoryDatabase() {
-  return new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(DIRECTORY_DB_NAME, 1);
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains(DIRECTORY_STORE_NAME)) {
-        database.createObjectStore(DIRECTORY_STORE_NAME);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-}
-
-async function loadSavedDirectoryHandle() {
-  const database = await openDirectoryDatabase();
-  return new Promise<DirectoryHandle | null>((resolve, reject) => {
-    const transaction = database.transaction(DIRECTORY_STORE_NAME, "readonly");
-    const request = transaction
-      .objectStore(DIRECTORY_STORE_NAME)
-      .get(DIRECTORY_HANDLE_KEY);
-    request.onsuccess = () =>
-      resolve((request.result as DirectoryHandle | undefined) || null);
-    request.onerror = () => reject(request.error);
-    transaction.oncomplete = () => database.close();
-  });
-}
-
-async function saveDirectoryHandle(handle: DirectoryHandle) {
-  const database = await openDirectoryDatabase();
-  await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(DIRECTORY_STORE_NAME, "readwrite");
-    transaction.objectStore(DIRECTORY_STORE_NAME).put(handle, DIRECTORY_HANDLE_KEY);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error);
-    transaction.onabort = () => reject(transaction.error);
-  });
-  database.close();
 }
 
 function isPersistedReportData(value: unknown): value is PersistedReportData {
@@ -458,8 +415,8 @@ export default function Home() {
   const [directoryName, setDirectoryName] = useState("");
   const [isDirectoryGateOpen, setIsDirectoryGateOpen] = useState(true);
   const [directoryStatus, setDirectoryStatus] = useState<
-    "checking" | "required" | "connecting" | "connected" | "unsupported" | "error"
-  >("checking");
+    "required" | "connecting" | "connected" | "unsupported" | "error"
+  >("required");
   const [directoryError, setDirectoryError] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
@@ -524,8 +481,17 @@ export default function Home() {
     try {
       let nextHandle = reuseSavedHandle ? directoryHandle : null;
       if (!nextHandle) {
+        if (!window.isSecureContext) {
+          setDirectoryStatus("unsupported");
+          setDirectoryError("目录访问需要通过 HTTPS 或 localhost 打开此工具");
+          return;
+        }
         const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
-        if (!picker) throw new Error("当前浏览器不支持选择电脑目录");
+        if (!picker) {
+          setDirectoryStatus("unsupported");
+          setDirectoryError("当前浏览器不支持目录访问，请使用 Chrome 或 Edge");
+          return;
+        }
         nextHandle = await picker({
           id: "weekly-report-workshop",
           mode: "readwrite",
@@ -581,10 +547,6 @@ export default function Home() {
       setIsReady(true);
       setIsDirectoryGateOpen(false);
       showToast(`已连接数据目录“${nextHandle.name}”`);
-
-      // Remembering the directory is only a convenience. Some managed Windows
-      // browser profiles can delay IndexedDB, so never hold up editing for it.
-      void saveDirectoryHandle(nextHandle).catch(() => undefined);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         setDirectoryStatus(wasConnected ? "connected" : "required");
@@ -598,37 +560,6 @@ export default function Home() {
       setIsDirectoryGateOpen(true);
     }
   };
-
-  useEffect(() => {
-    const prepareDirectoryGate = async () => {
-      if (!window.isSecureContext) {
-        setDirectoryStatus("unsupported");
-        setDirectoryError("目录访问需要通过 HTTPS 或 localhost 打开此工具");
-        return;
-      }
-      if (
-        typeof (window as DirectoryPickerWindow).showDirectoryPicker !== "function"
-      ) {
-        setDirectoryStatus("unsupported");
-        setDirectoryError("当前浏览器不支持目录访问，请使用 Chrome 或 Edge");
-        return;
-      }
-      // Do not make the user wait for IndexedDB before showing the directory
-      // chooser. In locked-down Windows profiles that lookup may be delayed.
-      setDirectoryStatus("required");
-      try {
-        const savedHandle = await loadSavedDirectoryHandle();
-        if (savedHandle) {
-          setDirectoryHandle((currentHandle) => currentHandle || savedHandle);
-          setDirectoryName((currentName) => currentName || savedHandle.name);
-        }
-      } catch {
-        // A directory can always be selected manually, even if the browser
-        // cannot restore its previous authorization record.
-      }
-    };
-    void prepareDirectoryGate();
-  }, []);
 
   useEffect(() => {
     if (!isReady || directoryStatus !== "connected" || !directoryHandle) return;
@@ -1272,12 +1203,9 @@ export default function Home() {
             )}
 
             <div className="directory-gate-actions">
-              {directoryStatus === "checking" ||
-              directoryStatus === "connecting" ? (
+              {directoryStatus === "connecting" ? (
                 <button className="primary-button directory-primary" disabled>
-                  {directoryStatus === "checking"
-                    ? "正在检查目录能力…"
-                    : "正在连接并读取数据…"}
+                  正在连接并读取数据…
                 </button>
               ) : directoryStatus === "unsupported" ? (
                 <div className="directory-browser-tip">
