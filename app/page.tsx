@@ -501,7 +501,11 @@ export default function Home() {
   const [isColumnManagerOpen, setIsColumnManagerOpen] = useState(false);
   const [isStatusManagerOpen, setIsStatusManagerOpen] = useState(false);
   const [isSectionManagerOpen, setIsSectionManagerOpen] = useState(false);
+  const [isReportSelectorOpen, setIsReportSelectorOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [selectedReportSectionIds, setSelectedReportSectionIds] = useState<
+    string[]
+  >([]);
   const [statusOptions, setStatusOptions] = useState<StatusOption[]>(
     cloneDefaultStatusOptions,
   );
@@ -536,6 +540,9 @@ export default function Home() {
 
   const activeSection =
     sections.find((section) => section.id === activeSectionId) || sections[0];
+  const selectedReportSections = sections.filter((section) =>
+    selectedReportSectionIds.includes(section.id),
+  );
 
   const totalItems = sections.reduce((total, section) => total + section.rows.length, 0);
   const statusToneByLabel = new Map(
@@ -573,6 +580,24 @@ export default function Home() {
   const completionRate = trackedItems
     ? Math.round((completedItems / trackedItems) * 100)
     : 0;
+  const selectedReportTotalItems = selectedReportSections.reduce(
+    (total, section) => total + section.rows.length,
+    0,
+  );
+  const selectedReportCompletedItems = selectedReportSections.reduce(
+    (total, section) =>
+      total +
+      section.rows.filter((row) => isCompletedStatus(row.status, statusOptions))
+        .length,
+    0,
+  );
+  const selectedReportAttentionItems = selectedReportSections.reduce(
+    (total, section) =>
+      total +
+      section.rows.filter((row) => statusToneByLabel.get(row.status) === "pending")
+        .length,
+    0,
+  );
 
   const showToast = (message: string) => {
     setToast(message);
@@ -1175,15 +1200,49 @@ export default function Home() {
     showToast("已恢复示例数据");
   };
 
+  const openReportSelector = () => {
+    const validSelectedIds = selectedReportSectionIds.filter((sectionId) =>
+      sections.some((section) => section.id === sectionId),
+    );
+    setSelectedReportSectionIds(
+      validSelectedIds.length
+        ? validSelectedIds
+        : sections.map((section) => section.id),
+    );
+    setIsReportSelectorOpen(true);
+  };
+
+  const toggleReportSection = (sectionId: string) => {
+    setSelectedReportSectionIds((current) =>
+      current.includes(sectionId)
+        ? current.filter((id) => id !== sectionId)
+        : [...current, sectionId],
+    );
+  };
+
+  const generateSelectedReport = () => {
+    if (!selectedReportSectionIds.length) {
+      showToast("请至少选择一张表格");
+      return;
+    }
+    setIsReportSelectorOpen(false);
+    setIsPreviewOpen(true);
+  };
+
   const copyReport = async () => {
     const html = buildReportHtml(
       reportTitle,
       weekStart,
       weekEnd,
-      sections,
+      selectedReportSections,
       statusOptions,
     );
-    const text = buildPlainText(reportTitle, weekStart, weekEnd, sections);
+    const text = buildPlainText(
+      reportTitle,
+      weekStart,
+      weekEnd,
+      selectedReportSections,
+    );
     try {
       if ("ClipboardItem" in window && navigator.clipboard.write) {
         await navigator.clipboard.write([
@@ -1312,7 +1371,7 @@ export default function Home() {
             </div>
             <button
               className="primary-button"
-              onClick={() => setIsPreviewOpen(true)}
+              onClick={openReportSelector}
               data-testid="generate-report"
             >
               <span>生成周报</span>
@@ -2094,6 +2153,126 @@ export default function Home() {
         </div>
       )}
 
+      {isReportSelectorOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setIsReportSelectorOpen(false);
+            }
+          }}
+        >
+          <section
+            className="column-modal report-selection-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="report-selection-title"
+          >
+            <div className="modal-heading">
+              <div>
+                <span className="eyebrow">REPORT CONTENT</span>
+                <h2 id="report-selection-title">选择本次周报包含的表格</h2>
+                <p>输出顺序跟随当前表格顺序，并自动重新编号为 1、2、3……</p>
+              </div>
+              <button
+                className="modal-close"
+                aria-label="关闭"
+                onClick={() => setIsReportSelectorOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="report-selection-tools">
+              <span>
+                已选择 <strong>{selectedReportSections.length}</strong> /{" "}
+                {sections.length} 张表格
+              </span>
+              <div>
+                <button
+                  className="text-button"
+                  onClick={() =>
+                    setSelectedReportSectionIds(
+                      sections.map((section) => section.id),
+                    )
+                  }
+                >
+                  全选
+                </button>
+                <button
+                  className="text-button"
+                  onClick={() => setSelectedReportSectionIds([])}
+                >
+                  清空
+                </button>
+              </div>
+            </div>
+
+            <div className="report-selection-list">
+              {sections.map((section) => {
+                const isSelected = selectedReportSectionIds.includes(section.id);
+                const outputIndex = selectedReportSections.findIndex(
+                  (selectedSection) => selectedSection.id === section.id,
+                );
+                return (
+                  <label
+                    className={`report-selection-item ${
+                      isSelected ? "is-selected" : ""
+                    }`}
+                    key={section.id}
+                    style={
+                      {
+                        "--section-color": section.color,
+                        "--section-tint": section.tint,
+                      } as React.CSSProperties
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleReportSection(section.id)}
+                    />
+                    <span
+                      className="report-selection-check"
+                      aria-hidden="true"
+                    >
+                      {isSelected ? "✓" : ""}
+                    </span>
+                    <span className="report-selection-order">
+                      {isSelected ? outputIndex + 1 : "—"}
+                    </span>
+                    <span className="report-selection-copy">
+                      <strong>{section.title}</strong>
+                      <small>
+                        {section.rows.length} 条记录
+                        {isSelected ? ` · 周报第 ${outputIndex + 1} 项` : ""}
+                      </small>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="report-selection-footer">
+              <button
+                className="secondary-button"
+                onClick={() => setIsReportSelectorOpen(false)}
+              >
+                取消
+              </button>
+              <button
+                className="primary-button"
+                onClick={generateSelectedReport}
+                disabled={!selectedReportSections.length}
+              >
+                生成所选周报
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {isPreviewOpen && (
         <div className="preview-overlay">
           <div className="preview-toolbar">
@@ -2127,12 +2306,12 @@ export default function Home() {
                   {formatDate(weekStart)} — {formatDate(weekEnd)}
                 </p>
                 <div className="report-summary">
-                  <span>本周共 {totalItems} 项</span>
-                  <span>已全网 {completedItems} 项</span>
-                  <span>需关注 {attentionItems} 项</span>
+                  <span>本周共 {selectedReportTotalItems} 项</span>
+                  <span>已全网 {selectedReportCompletedItems} 项</span>
+                  <span>需关注 {selectedReportAttentionItems} 项</span>
                 </div>
               </header>
-              {sections.map((section, index) => (
+              {selectedReportSections.map((section, index) => (
                 <section
                   className="report-section"
                   key={section.id}
