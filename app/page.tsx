@@ -572,7 +572,6 @@ export default function Home() {
         };
       }
 
-      await saveDirectoryHandle(nextHandle);
       applyLoadedReport(data);
       localStorage.removeItem(LEGACY_STORAGE_KEY);
       setDirectoryHandle(nextHandle);
@@ -582,6 +581,10 @@ export default function Home() {
       setIsReady(true);
       setIsDirectoryGateOpen(false);
       showToast(`已连接数据目录“${nextHandle.name}”`);
+
+      // Remembering the directory is only a convenience. Some managed Windows
+      // browser profiles can delay IndexedDB, so never hold up editing for it.
+      void saveDirectoryHandle(nextHandle).catch(() => undefined);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         setDirectoryStatus(wasConnected ? "connected" : "required");
@@ -610,15 +613,18 @@ export default function Home() {
         setDirectoryError("当前浏览器不支持目录访问，请使用 Chrome 或 Edge");
         return;
       }
+      // Do not make the user wait for IndexedDB before showing the directory
+      // chooser. In locked-down Windows profiles that lookup may be delayed.
+      setDirectoryStatus("required");
       try {
         const savedHandle = await loadSavedDirectoryHandle();
         if (savedHandle) {
-          setDirectoryHandle(savedHandle);
-          setDirectoryName(savedHandle.name);
+          setDirectoryHandle((currentHandle) => currentHandle || savedHandle);
+          setDirectoryName((currentName) => currentName || savedHandle.name);
         }
-        setDirectoryStatus("required");
       } catch {
-        setDirectoryStatus("required");
+        // A directory can always be selected manually, even if the browser
+        // cannot restore its previous authorization record.
       }
     };
     void prepareDirectoryGate();
