@@ -52,6 +52,14 @@ test("ships finished metadata and removes the starter preview", async () => {
   assert.match(page, /使用前，请先选择数据目录/);
   assert.match(page, /工作进展概览/);
   assert.match(page, /整体完成率/);
+  assert.match(page, /待分析/);
+  assert.match(page, /开发中/);
+  assert.match(page, /已转测/);
+  assert.match(page, /已全网/);
+  assert.match(page, /已取消/);
+  assert.match(page, /管理状态枚举/);
+  assert.match(page, /const addStatusOption/);
+  assert.match(page, /const removeStatusOption/);
   assert.doesNotMatch(page, /把进展讲清楚/);
   assert.doesNotMatch(page, /把时间留给工作/);
   assert.match(page, /自定义列/);

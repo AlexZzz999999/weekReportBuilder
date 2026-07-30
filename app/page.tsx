@@ -3,6 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 type ColumnType = "text" | "date" | "status" | "longtext";
+type StatusTone = "pending" | "active" | "done" | "cancelled";
+
+type StatusOption = {
+  id: string;
+  label: string;
+  tone: StatusTone;
+};
 
 type ReportColumn = {
   id: string;
@@ -27,11 +34,12 @@ type ReportSection = {
 };
 
 type PersistedReportData = {
-  version: 2;
+  version: 2 | 3;
   reportTitle: string;
   weekStart: string;
   weekEnd: string;
   sections: ReportSection[];
+  statusOptions?: Array<StatusOption | string>;
   updatedAt: string;
 };
 
@@ -54,7 +62,21 @@ type DirectoryPickerWindow = Window & {
 
 const LEGACY_STORAGE_KEY = "weekly-report-workshop-v1";
 const DATA_FILE_NAME = "周报工坊数据.json";
-const STATUS_OPTIONS = ["未开始", "进行中", "已完成", "有风险", "已延期", "待确认"];
+const DEFAULT_STATUS_OPTIONS: StatusOption[] = [
+  { id: "analyzing", label: "待分析", tone: "pending" },
+  { id: "developing", label: "开发中", tone: "active" },
+  { id: "testing", label: "已转测", tone: "active" },
+  { id: "online", label: "已全网", tone: "done" },
+  { id: "cancelled", label: "已取消", tone: "cancelled" },
+];
+const LEGACY_STATUS_MAP: Record<string, string> = {
+  未开始: "待分析",
+  待确认: "待分析",
+  进行中: "开发中",
+  有风险: "开发中",
+  已延期: "开发中",
+  已完成: "已全网",
+};
 const SECTION_COLOR_PRESETS = [
   "#e96d62",
   "#4e78d1",
@@ -70,6 +92,24 @@ const makeId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const cloneDefaultStatusOptions = () =>
+  DEFAULT_STATUS_OPTIONS.map((option) => ({ ...option }));
+
+function inferStatusTone(label: string): StatusTone {
+  if (label === "已全网" || label === "已完成") return "done";
+  if (label === "已取消") return "cancelled";
+  if (
+    label === "开发中" ||
+    label === "已转测" ||
+    label === "进行中" ||
+    label === "有风险" ||
+    label === "已延期"
+  ) {
+    return "active";
+  }
+  return "pending";
+}
 
 function createTint(hex: string) {
   const normalized = hex.replace("#", "");
@@ -110,7 +150,9 @@ async function readReportData(handle: DirectoryHandle) {
 
 async function writeReportData(
   handle: DirectoryHandle,
-  data: Omit<PersistedReportData, "version" | "updatedAt">,
+  data: Omit<PersistedReportData, "version" | "updatedAt" | "statusOptions"> & {
+    statusOptions: StatusOption[];
+  },
 ) {
   const fileHandle = await handle.getFileHandle(DATA_FILE_NAME, { create: true });
   const writable = await fileHandle.createWritable();
@@ -118,7 +160,7 @@ async function writeReportData(
     JSON.stringify(
       {
         ...data,
-        version: 2,
+        version: 3,
         updatedAt: new Date().toISOString(),
       } satisfies PersistedReportData,
       null,
@@ -154,7 +196,7 @@ const cloneInitialSections = (): ReportSection[] => [
         owner: "李明",
         action: "已协调临时资源，周四完成确认",
         deadline: "2026-07-31",
-        status: "进行中",
+        status: "开发中",
       },
     ],
   },
@@ -191,7 +233,7 @@ const cloneInitialSections = (): ReportSection[] => [
         testAt: "2026-07-29",
         onlineAt: "2026-08-04",
         developer: "王强",
-        status: "进行中",
+        status: "已转测",
       },
       {
         id: "pipeline-demo-2",
@@ -205,7 +247,7 @@ const cloneInitialSections = (): ReportSection[] => [
         testAt: "2026-07-25",
         onlineAt: "2026-07-29",
         developer: "周颖",
-        status: "已完成",
+        status: "已全网",
       },
     ],
   },
@@ -238,7 +280,7 @@ const cloneInitialSections = (): ReportSection[] => [
         planAt: "2026-08-01",
         owner: "陈晨",
         progress: "数据口径已确认，开发完成 80%",
-        status: "进行中",
+        status: "开发中",
       },
     ],
   },
@@ -270,7 +312,7 @@ const cloneInitialSections = (): ReportSection[] => [
         createdAt: "2026-07-22",
         planAt: "2026-08-07",
         priority: "高",
-        status: "未开始",
+        status: "待分析",
         note: "下周例会同步初版结论",
       },
     ],
@@ -297,10 +339,11 @@ function formatDate(date: string) {
   return `${year}.${month}.${day}`;
 }
 
-function getStatusClass(status: string) {
-  if (status === "已完成") return "status-done";
-  if (status === "有风险" || status === "已延期") return "status-risk";
-  if (status === "进行中") return "status-active";
+function getStatusClass(status: string, options: StatusOption[]) {
+  const tone = options.find((option) => option.label === status)?.tone;
+  if (tone === "done") return "status-done";
+  if (tone === "cancelled") return "status-risk";
+  if (tone === "active") return "status-active";
   return "status-neutral";
 }
 
@@ -358,7 +401,7 @@ function buildReportHtml(
     )
     .join("");
 
-  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;color:#22312f;line-height:1.5">
+  return `<div style="font-family:'Times New Roman','Microsoft YaHei','微软雅黑',serif;color:#22312f;line-height:1.5">
     <div style="border-bottom:3px solid #193d3d;padding:0 0 18px;margin:0 0 24px">
       <div style="font-size:12px;letter-spacing:2px;color:#6d7b78;margin-bottom:6px">WEEKLY REPORT</div>
       <h1 style="margin:0 0 6px;font-size:28px;color:#193d3d">${escapeHtml(title)}</h1>
@@ -400,8 +443,14 @@ export default function Home() {
   const [weekStart, setWeekStart] = useState(initialWeek.start);
   const [weekEnd, setWeekEnd] = useState(initialWeek.end);
   const [isColumnManagerOpen, setIsColumnManagerOpen] = useState(false);
+  const [isStatusManagerOpen, setIsStatusManagerOpen] = useState(false);
   const [isSectionManagerOpen, setIsSectionManagerOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [statusOptions, setStatusOptions] = useState<StatusOption[]>(
+    cloneDefaultStatusOptions,
+  );
+  const [newStatusName, setNewStatusName] = useState("");
+  const [newStatusTone, setNewStatusTone] = useState<StatusTone>("pending");
   const [newColumnName, setNewColumnName] = useState("");
   const [newColumnType, setNewColumnType] = useState<ColumnType>("text");
   const [newSectionName, setNewSectionName] = useState("");
@@ -428,26 +477,40 @@ export default function Home() {
     sections.find((section) => section.id === activeSectionId) || sections[0];
 
   const totalItems = sections.reduce((total, section) => total + section.rows.length, 0);
+  const statusToneByLabel = new Map(
+    statusOptions.map((option) => [option.label, option.tone]),
+  );
   const completedItems = sections.reduce(
     (total, section) =>
-      total + section.rows.filter((row) => row.status === "已完成").length,
+      total +
+      section.rows.filter((row) => statusToneByLabel.get(row.status) === "done")
+        .length,
     0,
   );
-  const riskItems = sections.reduce(
+  const cancelledItems = sections.reduce(
     (total, section) =>
       total +
-      section.rows.filter(
-        (row) => row.status === "有风险" || row.status === "已延期",
-      ).length,
+      section.rows.filter((row) => statusToneByLabel.get(row.status) === "cancelled")
+        .length,
+    0,
+  );
+  const attentionItems = sections.reduce(
+    (total, section) =>
+      total +
+      section.rows.filter((row) => statusToneByLabel.get(row.status) === "pending")
+        .length,
     0,
   );
   const inProgressItems = sections.reduce(
     (total, section) =>
-      total + section.rows.filter((row) => row.status === "进行中").length,
+      total +
+      section.rows.filter((row) => statusToneByLabel.get(row.status) === "active")
+        .length,
     0,
   );
-  const completionRate = totalItems
-    ? Math.round((completedItems / totalItems) * 100)
+  const trackedItems = totalItems - cancelledItems;
+  const completionRate = trackedItems
+    ? Math.round((completedItems / trackedItems) * 100)
     : 0;
 
   const showToast = (message: string) => {
@@ -457,17 +520,77 @@ export default function Home() {
   };
 
   const applyLoadedReport = (data: PersistedReportData) => {
-    setSections(data.sections);
+    const hasStoredStatusOptions =
+      Array.isArray(data.statusOptions) && data.statusOptions.length > 0;
+    const nextStatusOptions = hasStoredStatusOptions
+      ? data.statusOptions!.map((option, index) =>
+          typeof option === "string"
+            ? {
+                id: `status-${index}-${makeId()}`,
+                label: option,
+                tone: inferStatusTone(option),
+              }
+            : {
+                id: option.id || `status-${index}-${makeId()}`,
+                label: option.label,
+                tone: option.tone || inferStatusTone(option.label),
+              },
+        )
+      : cloneDefaultStatusOptions();
+    const nextSections = data.sections.map((section) => {
+      const statusColumnIds = section.columns
+        .filter((column) => column.type === "status")
+        .map((column) => column.id);
+      if (!statusColumnIds.length) return section;
+      return {
+        ...section,
+        rows: section.rows.map((row) => {
+          const nextRow = { ...row };
+          statusColumnIds.forEach((columnId) => {
+            const currentValue = nextRow[columnId];
+            if (!hasStoredStatusOptions && LEGACY_STATUS_MAP[currentValue]) {
+              nextRow[columnId] = LEGACY_STATUS_MAP[currentValue];
+            }
+          });
+          return nextRow;
+        }),
+      };
+    });
+
+    nextSections.forEach((section) => {
+      const statusColumnIds = section.columns
+        .filter((column) => column.type === "status")
+        .map((column) => column.id);
+      section.rows.forEach((row) => {
+        statusColumnIds.forEach((columnId) => {
+          const label = row[columnId]?.trim();
+          if (
+            label &&
+            !nextStatusOptions.some((option) => option.label === label)
+          ) {
+            nextStatusOptions.push({
+              id: `status-${makeId()}`,
+              label,
+              tone: inferStatusTone(label),
+            });
+          }
+        });
+      });
+    });
+
+    setSections(nextSections);
+    setStatusOptions(nextStatusOptions);
     setReportTitle(data.reportTitle);
     setWeekStart(data.weekStart);
     setWeekEnd(data.weekEnd);
-    if (!data.sections.some((section) => section.id === activeSectionId)) {
-      setActiveSectionId(data.sections[0]?.id || "");
+    if (!nextSections.some((section) => section.id === activeSectionId)) {
+      setActiveSectionId(nextSections[0]?.id || "");
     }
   };
 
   const currentReportData = () => ({
     sections,
+    statusOptions,
     reportTitle,
     weekStart,
     weekEnd,
@@ -521,6 +644,16 @@ export default function Home() {
             if (isPersistedReportData(parsed)) {
               initialData = {
                 sections: parsed.sections,
+                statusOptions:
+                  parsed.statusOptions?.map((option, index) =>
+                    typeof option === "string"
+                      ? {
+                          id: `status-${index}-${makeId()}`,
+                          label: option,
+                          tone: inferStatusTone(option),
+                        }
+                      : option,
+                  ) || cloneDefaultStatusOptions(),
                 reportTitle: parsed.reportTitle,
                 weekStart: parsed.weekStart,
                 weekEnd: parsed.weekEnd,
@@ -533,7 +666,7 @@ export default function Home() {
         await writeReportData(nextHandle, initialData);
         data = {
           ...initialData,
-          version: 2,
+          version: 3,
           updatedAt: new Date().toISOString(),
         };
       }
@@ -578,6 +711,7 @@ export default function Home() {
     };
   }, [
     sections,
+    statusOptions,
     reportTitle,
     weekStart,
     weekEnd,
@@ -614,12 +748,113 @@ export default function Home() {
     );
   };
 
+  const replaceStatusValue = (previousLabel: string, nextLabel: string) => {
+    setSections((current) =>
+      current.map((section) => {
+        const statusColumnIds = section.columns
+          .filter((column) => column.type === "status")
+          .map((column) => column.id);
+        if (!statusColumnIds.length) return section;
+        return {
+          ...section,
+          rows: section.rows.map((row) => {
+            const nextRow = { ...row };
+            statusColumnIds.forEach((columnId) => {
+              if (nextRow[columnId] === previousLabel) {
+                nextRow[columnId] = nextLabel;
+              }
+            });
+            return nextRow;
+          }),
+        };
+      }),
+    );
+  };
+
+  const renameStatusOption = (statusId: string, label: string) => {
+    const nextLabel = label.trim();
+    const currentOption = statusOptions.find((option) => option.id === statusId);
+    if (!currentOption || currentOption.label === nextLabel) return;
+    if (!nextLabel) {
+      showToast("状态名称不能为空");
+      return;
+    }
+    if (
+      statusOptions.some(
+        (option) => option.id !== statusId && option.label === nextLabel,
+      )
+    ) {
+      showToast("状态名称不能重复");
+      return;
+    }
+    setStatusOptions((current) =>
+      current.map((option) =>
+        option.id === statusId ? { ...option, label: nextLabel } : option,
+      ),
+    );
+    replaceStatusValue(currentOption.label, nextLabel);
+  };
+
+  const updateStatusTone = (statusId: string, tone: StatusTone) => {
+    setStatusOptions((current) =>
+      current.map((option) =>
+        option.id === statusId ? { ...option, tone } : option,
+      ),
+    );
+  };
+
+  const moveStatusOption = (statusId: string, direction: -1 | 1) => {
+    setStatusOptions((current) => {
+      const index = current.findIndex((option) => option.id === statusId);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  };
+
+  const addStatusOption = () => {
+    const label = newStatusName.trim();
+    if (!label) {
+      showToast("请先填写状态名称");
+      return;
+    }
+    if (statusOptions.some((option) => option.label === label)) {
+      showToast("状态名称不能重复");
+      return;
+    }
+    setStatusOptions((current) => [
+      ...current,
+      { id: `status-${makeId()}`, label, tone: newStatusTone },
+    ]);
+    setNewStatusName("");
+    setNewStatusTone("pending");
+    showToast(`已添加状态“${label}”`);
+  };
+
+  const removeStatusOption = (statusId: string) => {
+    if (statusOptions.length <= 1) {
+      showToast("至少需要保留一个状态");
+      return;
+    }
+    const index = statusOptions.findIndex((option) => option.id === statusId);
+    if (index < 0) return;
+    const target = statusOptions[index];
+    const replacement = statusOptions[index + 1] || statusOptions[index - 1];
+    setStatusOptions((current) =>
+      current.filter((option) => option.id !== statusId),
+    );
+    replaceStatusValue(target.label, replacement.label);
+    showToast(`已删除状态“${target.label}”`);
+  };
+
   const addRow = () => {
     const row = activeSection.columns.reduce<ReportRow>(
       (item, column) => {
         item[column.id] =
           column.type === "status"
-            ? "未开始"
+            ? statusOptions[0]?.label || "待分析"
             : column.id === "no"
               ? String(activeSection.rows.length + 1).padStart(2, "0")
               : "";
@@ -664,7 +899,13 @@ export default function Home() {
                 ...section.columns,
                 { id: columnId, label, type: newColumnType },
               ],
-              rows: section.rows.map((row) => ({ ...row, [columnId]: "" })),
+              rows: section.rows.map((row) => ({
+                ...row,
+                [columnId]:
+                  newColumnType === "status"
+                    ? statusOptions[0]?.label || "待分析"
+                    : "",
+              })),
             }
           : section,
       ),
@@ -686,6 +927,17 @@ export default function Home() {
               columns: section.columns.map((column) =>
                 column.id === columnId ? { ...column, ...updates } : column,
               ),
+              rows:
+                updates.type === "status"
+                  ? section.rows.map((row) => ({
+                      ...row,
+                      [columnId]: statusOptions.some(
+                        (option) => option.label === row[columnId],
+                      )
+                        ? row[columnId]
+                        : statusOptions[0]?.label || "待分析",
+                    }))
+                  : section.rows,
             }
           : section,
       ),
@@ -806,6 +1058,7 @@ export default function Home() {
     setReportTitle("研发交付中心 · 工作周报");
     setWeekStart(initialWeek.start);
     setWeekEnd(initialWeek.end);
+    setStatusOptions(cloneDefaultStatusOptions());
     setActiveSectionId("pipeline");
     showToast("已恢复示例数据");
   };
@@ -980,7 +1233,7 @@ export default function Home() {
               <i style={{ width: `${completionRate}%` }} />
             </div>
             <small>
-              {completedItems} / {totalItems} 项已完成
+              {completedItems} / {trackedItems} 项已全网
             </small>
           </div>
 
@@ -995,7 +1248,7 @@ export default function Home() {
             </div>
             <div className="progress-metric progress-metric-risk">
               <span>需关注</span>
-              <strong>{String(riskItems).padStart(2, "0")}</strong>
+              <strong>{String(attentionItems).padStart(2, "0")}</strong>
             </div>
           </div>
         </section>
@@ -1039,6 +1292,13 @@ export default function Home() {
               >
                 <span aria-hidden="true">＋</span> 自定义列
               </button>
+              <button
+                className="secondary-button"
+                onClick={() => setIsStatusManagerOpen(true)}
+                data-testid="manage-statuses"
+              >
+                状态枚举
+              </button>
               <button className="add-row-button" onClick={addRow} data-testid="add-row">
                 <span aria-hidden="true">＋</span> 新增一条
               </button>
@@ -1069,8 +1329,11 @@ export default function Home() {
                               aria-label={`${column.label}`}
                               className={`cell-input status-select ${getStatusClass(
                                 row[column.id] || "",
+                                statusOptions,
                               )}`}
-                              value={row[column.id] || "未开始"}
+                              value={
+                                row[column.id] || statusOptions[0]?.label || ""
+                              }
                               onChange={(event) =>
                                 updateCell(
                                   activeSection.id,
@@ -1080,8 +1343,10 @@ export default function Home() {
                                 )
                               }
                             >
-                              {STATUS_OPTIONS.map((status) => (
-                                <option key={status}>{status}</option>
+                              {statusOptions.map((status) => (
+                                <option key={status.id} value={status.label}>
+                                  {status.label}
+                                </option>
                               ))}
                             </select>
                           ) : column.type === "longtext" ? (
@@ -1447,6 +1712,131 @@ export default function Home() {
         </div>
       )}
 
+      {isStatusManagerOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIsStatusManagerOpen(false);
+          }}
+        >
+          <section
+            className="column-modal status-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="status-modal-title"
+          >
+            <div className="modal-heading">
+              <div>
+                <span className="eyebrow">STATUS SETTINGS</span>
+                <h2 id="status-modal-title">管理状态枚举</h2>
+                <p>状态对全部表格生效，可重命名、调整顺序或增删。</p>
+              </div>
+              <button
+                className="modal-close"
+                aria-label="关闭"
+                onClick={() => setIsStatusManagerOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="status-option-list">
+              {statusOptions.map((option, index) => (
+                <div className="status-option-item" key={option.id}>
+                  <span className="drag-handle" aria-hidden="true">
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                  <input
+                    aria-label="状态名称"
+                    key={`${option.id}-${option.label}`}
+                    defaultValue={option.label}
+                    onBlur={(event) => {
+                      renameStatusOption(option.id, event.target.value);
+                      event.target.value =
+                        statusOptions.find((item) => item.id === option.id)?.label ||
+                        option.label;
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                  />
+                  <select
+                    aria-label="状态分类"
+                    value={option.tone}
+                    onChange={(event) =>
+                      updateStatusTone(
+                        option.id,
+                        event.target.value as StatusTone,
+                      )
+                    }
+                  >
+                    <option value="pending">待处理</option>
+                    <option value="active">进行中</option>
+                    <option value="done">已完成</option>
+                    <option value="cancelled">已取消</option>
+                  </select>
+                  <div className="column-move-actions">
+                    <button
+                      aria-label="向前移动"
+                      disabled={index === 0}
+                      onClick={() => moveStatusOption(option.id, -1)}
+                    >
+                      ←
+                    </button>
+                    <button
+                      aria-label="向后移动"
+                      disabled={index === statusOptions.length - 1}
+                      onClick={() => moveStatusOption(option.id, 1)}
+                    >
+                      →
+                    </button>
+                  </div>
+                  <button
+                    className="column-delete"
+                    aria-label={`删除${option.label}状态`}
+                    onClick={() => removeStatusOption(option.id)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="add-status-form">
+              <div>
+                <strong>添加状态</strong>
+                <span>状态分类用于统计完成率和进展数量</span>
+              </div>
+              <input
+                aria-label="新状态名称"
+                placeholder="例如：待发布"
+                value={newStatusName}
+                onChange={(event) => setNewStatusName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") addStatusOption();
+                }}
+              />
+              <select
+                aria-label="新状态分类"
+                value={newStatusTone}
+                onChange={(event) =>
+                  setNewStatusTone(event.target.value as StatusTone)
+                }
+              >
+                <option value="pending">待处理</option>
+                <option value="active">进行中</option>
+                <option value="done">已完成</option>
+                <option value="cancelled">已取消</option>
+              </select>
+              <button className="add-row-button" onClick={addStatusOption}>
+                添加状态
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       {isColumnManagerOpen && (
         <div
           className="modal-backdrop"
@@ -1596,8 +1986,8 @@ export default function Home() {
                 </p>
                 <div className="report-summary">
                   <span>本周共 {totalItems} 项</span>
-                  <span>已完成 {completedItems} 项</span>
-                  <span>需关注 {riskItems} 项</span>
+                  <span>已全网 {completedItems} 项</span>
+                  <span>需关注 {attentionItems} 项</span>
                 </div>
               </header>
               {sections.map((section, index) => (
