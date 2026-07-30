@@ -54,11 +54,13 @@ test("ships finished metadata and removes the starter preview", async () => {
   assert.match(page, /管理周报表格/);
   assert.match(page, /const addSection/);
   assert.match(page, /const removeSection/);
-  assert.match(page, /选择本次周报包含的表格/);
+  assert.match(page, /选择周报内容/);
   assert.match(page, /const selectedReportSections = sections\.filter/);
   assert.match(page, /selectedReportSections\.map\(\(section, index\)/);
   assert.match(page, /buildPlainText[\s\S]*selectedReportSections/);
-  assert.match(page, /自动重新编号为 1、2、3/);
+  assert.match(page, /自动连续编号/);
+  assert.match(styles, /\.report-selection-heading/);
+  assert.match(styles, /\.report-selection-item\.is-selected/);
   assert.match(page, /ClipboardItem/);
   assert.match(layout, /openGraph/);
   assert.match(styles, /"Times New Roman", "Microsoft YaHei", "微软雅黑"/);

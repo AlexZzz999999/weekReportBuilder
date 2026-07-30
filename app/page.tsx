@@ -2169,11 +2169,16 @@ export default function Home() {
             aria-modal="true"
             aria-labelledby="report-selection-title"
           >
-            <div className="modal-heading">
-              <div>
-                <span className="eyebrow">REPORT CONTENT</span>
-                <h2 id="report-selection-title">选择本次周报包含的表格</h2>
-                <p>输出顺序跟随当前表格顺序，并自动重新编号为 1、2、3……</p>
+            <div className="report-selection-heading">
+              <div className="report-selection-title-group">
+                <span className="report-selection-mark" aria-hidden="true">
+                  周
+                </span>
+                <div>
+                  <span className="eyebrow">REPORT CONTENT</span>
+                  <h2 id="report-selection-title">选择周报内容</h2>
+                  <p>勾选本次需要呈现的表格，输出时会自动连续编号。</p>
+                </div>
               </div>
               <button
                 className="modal-close"
@@ -2185,11 +2190,14 @@ export default function Home() {
             </div>
 
             <div className="report-selection-tools">
-              <span>
-                已选择 <strong>{selectedReportSections.length}</strong> /{" "}
-                {sections.length} 张表格
-              </span>
-              <div>
+              <div className="report-selection-summary">
+                <strong>{selectedReportSections.length}</strong>
+                <span>
+                  张表格将被纳入周报
+                  <small>共 {sections.length} 张可选</small>
+                </span>
+              </div>
+              <div className="report-selection-bulk-actions">
                 <button
                   className="text-button"
                   onClick={() =>
@@ -2198,8 +2206,9 @@ export default function Home() {
                     )
                   }
                 >
-                  全选
+                  全部选择
                 </button>
+                <i aria-hidden="true" />
                 <button
                   className="text-button"
                   onClick={() => setSelectedReportSectionIds([])}
@@ -2233,21 +2242,25 @@ export default function Home() {
                       checked={isSelected}
                       onChange={() => toggleReportSection(section.id)}
                     />
+                    <span className="report-selection-order">
+                      {isSelected
+                        ? String(outputIndex + 1).padStart(2, "0")
+                        : "—"}
+                    </span>
+                    <span className="report-selection-copy">
+                      <strong>{section.title}</strong>
+                      <small>
+                        {section.description || "本周工作进展"}
+                      </small>
+                    </span>
+                    <span className="report-selection-count">
+                      {section.rows.length} 条
+                    </span>
                     <span
                       className="report-selection-check"
                       aria-hidden="true"
                     >
                       {isSelected ? "✓" : ""}
-                    </span>
-                    <span className="report-selection-order">
-                      {isSelected ? outputIndex + 1 : "—"}
-                    </span>
-                    <span className="report-selection-copy">
-                      <strong>{section.title}</strong>
-                      <small>
-                        {section.rows.length} 条记录
-                        {isSelected ? ` · 周报第 ${outputIndex + 1} 项` : ""}
-                      </small>
                     </span>
                   </label>
                 );
@@ -2255,6 +2268,10 @@ export default function Home() {
             </div>
 
             <div className="report-selection-footer">
+              <span>
+                将按当前表格顺序生成
+                <strong> 1 — {selectedReportSections.length}</strong>
+              </span>
               <button
                 className="secondary-button"
                 onClick={() => setIsReportSelectorOpen(false)}
@@ -2266,7 +2283,8 @@ export default function Home() {
                 onClick={generateSelectedReport}
                 disabled={!selectedReportSections.length}
               >
-                生成所选周报
+                生成周报预览
+                <span aria-hidden="true">↗</span>
               </button>
             </div>
           </section>
