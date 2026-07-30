@@ -41,5 +41,5 @@ next-env.d.ts
 /outputs/
 /work/
 
-# Local weekly-report content selected by the user at runtime
+# Local weekly-report content stored in the project directory
 /周报工坊数据.json

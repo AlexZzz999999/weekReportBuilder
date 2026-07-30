@@ -60,6 +60,13 @@ type DirectoryPickerWindow = Window & {
   }) => Promise<DirectoryHandle>;
 };
 
+type ProjectStorageResponse = {
+  data?: PersistedReportData | null;
+  directoryName: string;
+  fileName: string;
+  error?: string;
+};
+
 const LEGACY_STORAGE_KEY = "weekly-report-workshop-v1";
 const DATA_FILE_NAME = "周报工坊数据.json";
 const DEFAULT_STATUS_OPTIONS: StatusOption[] = [
@@ -168,6 +175,32 @@ async function writeReportData(
     ),
   );
   await writable.close();
+}
+
+async function readProjectReportData() {
+  const response = await fetch("/api/report-data", { cache: "no-store" });
+  const result = (await response.json()) as ProjectStorageResponse;
+  if (!response.ok) {
+    throw new Error(result.error || "无法读取项目目录中的周报数据");
+  }
+  return result;
+}
+
+async function writeProjectReportData(
+  data: Omit<PersistedReportData, "version" | "updatedAt" | "statusOptions"> & {
+    statusOptions: StatusOption[];
+  },
+) {
+  const response = await fetch("/api/report-data", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  const result = (await response.json()) as ProjectStorageResponse;
+  if (!response.ok) {
+    throw new Error(result.error || "无法写入项目目录中的周报数据");
+  }
+  return result;
 }
 
 const cloneInitialSections = (): ReportSection[] => [
@@ -484,17 +517,22 @@ export default function Home() {
   const [directoryHandle, setDirectoryHandle] = useState<DirectoryHandle | null>(
     null,
   );
-  const [directoryName, setDirectoryName] = useState("");
-  const [isDirectoryGateOpen, setIsDirectoryGateOpen] = useState(true);
+  const [storageMode, setStorageMode] = useState<"project" | "directory">(
+    "project",
+  );
+  const [projectDirectoryName, setProjectDirectoryName] = useState("项目目录");
+  const [directoryName, setDirectoryName] = useState("项目目录");
+  const [isDirectoryGateOpen, setIsDirectoryGateOpen] = useState(false);
   const [directoryStatus, setDirectoryStatus] = useState<
     "required" | "connecting" | "connected" | "unsupported" | "error"
-  >("required");
+  >("connected");
   const [directoryError, setDirectoryError] = useState("");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">(
     "idle",
   );
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const projectLoadStartedRef = useRef(false);
 
   const activeSection =
     sections.find((section) => section.id === activeSectionId) || sections[0];
@@ -645,8 +683,12 @@ export default function Home() {
         });
       }
 
-      if (!reuseSavedHandle && wasConnected && directoryHandle) {
-        await writeReportData(directoryHandle, currentReportData());
+      if (!reuseSavedHandle && wasConnected) {
+        if (storageMode === "project") {
+          await writeProjectReportData(currentReportData());
+        } else if (directoryHandle) {
+          await writeReportData(directoryHandle, currentReportData());
+        }
       }
 
       let permission = await nextHandle.queryPermission({ mode: "readwrite" });
@@ -698,6 +740,7 @@ export default function Home() {
       localStorage.removeItem(LEGACY_STORAGE_KEY);
       setDirectoryHandle(nextHandle);
       setDirectoryName(nextHandle.name);
+      setStorageMode("directory");
       setDirectoryStatus("connected");
       setSaveStatus("saved");
       setIsReady(true);
@@ -717,16 +760,61 @@ export default function Home() {
     }
   };
 
+  const activateProjectDirectory = async (initialLoad = false) => {
+    setDirectoryStatus("connecting");
+    setDirectoryError("");
+    try {
+      const result = await readProjectReportData();
+      if (result.data) {
+        applyLoadedReport(result.data);
+      } else {
+        await writeProjectReportData(currentReportData());
+      }
+      setProjectDirectoryName(result.directoryName || "项目目录");
+      setDirectoryName(result.directoryName || "项目目录");
+      setDirectoryHandle(null);
+      setStorageMode("project");
+      setDirectoryStatus("connected");
+      setSaveStatus("saved");
+      setIsReady(true);
+      setIsDirectoryGateOpen(false);
+      if (!initialLoad) showToast("已切换到项目目录");
+    } catch (error) {
+      setDirectoryError(
+        error instanceof Error ? error.message : "项目目录读取失败",
+      );
+      setDirectoryStatus(initialLoad ? "connected" : "error");
+      setSaveStatus("error");
+      setIsReady(true);
+      if (!initialLoad) setIsDirectoryGateOpen(true);
+    }
+  };
+
   useEffect(() => {
-    if (!isReady || directoryStatus !== "connected" || !directoryHandle) return;
+    if (projectLoadStartedRef.current) return;
+    projectLoadStartedRef.current = true;
+    void activateProjectDirectory(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isReady || directoryStatus !== "connected") return;
+    if (storageMode === "directory" && !directoryHandle) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     setSaveStatus("saving");
     saveTimer.current = setTimeout(() => {
-      void writeReportData(directoryHandle, currentReportData())
+      const saveOperation =
+        storageMode === "directory" && directoryHandle
+          ? writeReportData(directoryHandle, currentReportData())
+          : writeProjectReportData(currentReportData());
+      void saveOperation
         .then(() => setSaveStatus("saved"))
         .catch(() => {
           setSaveStatus("error");
-          showToast("保存失败，请检查目录权限");
+          showToast(
+            storageMode === "project"
+              ? "保存失败，请检查项目目录写入权限"
+              : "保存失败，请检查目录权限",
+          );
         });
     }, 650);
     return () => {
@@ -741,6 +829,7 @@ export default function Home() {
     isReady,
     directoryHandle,
     directoryStatus,
+    storageMode,
   ]);
 
   useEffect(
@@ -1444,7 +1533,9 @@ export default function Home() {
                 {saveStatus === "saving"
                   ? "正在写入数据文件…"
                   : saveStatus === "error"
-                    ? "保存失败，请检查目录权限"
+                    ? storageMode === "project"
+                      ? "保存失败，请检查项目目录写入权限"
+                      : "保存失败，请检查目录权限"
                     : `已保存至 ${directoryName}/${DATA_FILE_NAME}`}
               </span>
               <span>横向滚动可查看全部列</span>
@@ -1467,11 +1558,13 @@ export default function Home() {
             <span className="eyebrow">LOCAL DATA DIRECTORY</span>
             <h2 id="directory-gate-title">
               {directoryStatus === "connected"
-                ? "当前数据目录"
-                : "使用前，请先选择数据目录"}
+                ? "当前数据位置"
+                : "选择数据目录"}
             </h2>
             <p className="directory-gate-lead">
-              周报内容将直接保存在你选择的电脑目录中。未连接目录前，编辑功能不会开放。
+              {storageMode === "project"
+                ? "默认使用项目根目录，刷新页面或重启服务后会自动读取，无需再次选择。"
+                : "当前使用你手动选择的电脑目录，可随时切回项目根目录。"}
             </p>
 
             <div className="directory-file-card">
@@ -1483,7 +1576,7 @@ export default function Home() {
                 <small>
                   {directoryName
                     ? `保存位置：${directoryName}`
-                    : "选择后将自动创建此数据文件"}
+                    : "默认保存在项目根目录"}
                 </small>
               </div>
               {directoryStatus === "connected" && <em>已连接</em>}
@@ -1502,16 +1595,36 @@ export default function Home() {
                   正在连接并读取数据…
                 </button>
               ) : directoryStatus === "unsupported" ? (
-                <div className="directory-browser-tip">
-                  请使用最新版 Chrome 或 Edge，并通过 HTTPS 或 localhost 访问。
-                </div>
+                <>
+                  <div className="directory-browser-tip">
+                    手动选择目录需要最新版 Chrome 或 Edge，并通过 HTTPS 或
+                    localhost 访问。
+                  </div>
+                  <button
+                    className="secondary-button"
+                    onClick={() => {
+                      setDirectoryStatus("connected");
+                      setIsDirectoryGateOpen(false);
+                    }}
+                  >
+                    继续使用项目目录
+                  </button>
+                </>
               ) : directoryStatus === "connected" ? (
                 <>
+                  {storageMode === "directory" && (
+                    <button
+                      className="secondary-button"
+                      onClick={() => void activateProjectDirectory()}
+                    >
+                      使用项目目录“{projectDirectoryName}”
+                    </button>
+                  )}
                   <button
                     className="secondary-button"
                     onClick={() => void connectDirectory(false)}
                   >
-                    选择其他目录
+                    选择其他电脑目录
                   </button>
                   <button
                     className="primary-button directory-primary"
@@ -1549,8 +1662,8 @@ export default function Home() {
             </div>
 
             <div className="directory-gate-footnote">
-              <span>✓ 周报正文不再保存在浏览器中</span>
-              <span>✓ 刷新页面后仍会要求确认目录</span>
+              <span>✓ 默认文件位于项目根目录</span>
+              <span>✓ 周报正文不会保存在浏览器中</span>
             </div>
           </section>
         </div>

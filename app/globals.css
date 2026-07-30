@@ -1015,6 +1015,7 @@ select:focus-visible {
 .directory-gate-actions {
   margin-top: 18px;
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: 9px;
 }
