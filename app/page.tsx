@@ -381,9 +381,15 @@ function buildReportHtml(
           <tbody>${
             section.rows.length
               ? section.rows
-                  .map(
-                    (row) =>
-                      `<tr>${section.columns
+                  .map((row) => {
+                    const isCompletedRow = section.columns.some(
+                      (column) =>
+                        column.type === "status" &&
+                        statusOptions.find(
+                          (option) => option.label === row[column.id],
+                        )?.tone === "done",
+                    );
+                    return `<tr>${section.columns
                         .map((column) => {
                           const value =
                             column.type === "date"
@@ -394,15 +400,18 @@ function buildReportHtml(
                             statusOptions.find(
                               (option) => option.label === row[column.id],
                             )?.tone === "done";
-                          const completedStyle = isCompleted
-                            ? "background:#e4f5ea;color:#246b4f;font-weight:700;"
+                          const rowStyle = isCompletedRow
+                            ? "background:#e4f5ea;"
+                            : "";
+                          const statusStyle = isCompleted
+                            ? "color:#246b4f;font-weight:700;"
                             : "color:#273634;";
-                          return `<td style="padding:9px 8px;border:1px solid #dfe5e2;${completedStyle}vertical-align:top">${escapeHtml(
+                          return `<td style="padding:9px 8px;border:1px solid #dfe5e2;${rowStyle}${statusStyle}vertical-align:top">${escapeHtml(
                             value,
                           )}</td>`;
                         })
-                        .join("")}</tr>`,
-                  )
+                        .join("")}</tr>`;
+                  })
                   .join("")
               : `<tr><td colspan="${section.columns.length}" style="padding:14px;border:1px solid #dfe5e2;color:#8b9693">本周暂无事项</td></tr>`
           }</tbody>
@@ -2033,8 +2042,19 @@ export default function Home() {
                       </thead>
                       <tbody>
                         {section.rows.length ? (
-                          section.rows.map((row) => (
-                            <tr key={row.id}>
+                          section.rows.map((row) => {
+                            const isCompletedRow = section.columns.some(
+                              (column) =>
+                                column.type === "status" &&
+                                statusToneByLabel.get(row[column.id]) === "done",
+                            );
+                            return (
+                            <tr
+                              key={row.id}
+                              className={
+                                isCompletedRow ? "report-row-complete" : undefined
+                              }
+                            >
                               {section.columns.map((column) => (
                                 <td
                                   key={column.id}
@@ -2051,7 +2071,8 @@ export default function Home() {
                                 </td>
                               ))}
                             </tr>
-                          ))
+                            );
+                          })
                         ) : (
                           <tr>
                             <td colSpan={section.columns.length}>本周暂无事项</td>

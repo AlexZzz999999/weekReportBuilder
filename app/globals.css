@@ -1605,8 +1605,11 @@ select:focus-visible {
   color: #344441;
 }
 
-.report-section td.report-status-complete {
+.report-section tr.report-row-complete td {
   background: #e4f5ea;
+}
+
+.report-section td.report-status-complete {
   color: #246b4f;
   font-weight: 800;
 }
