@@ -1495,6 +1495,8 @@ select:focus-visible {
   padding: 54px;
   background: #fff;
   box-shadow: 0 24px 70px rgba(31, 47, 45, 0.16);
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
 }
 
 .report-header {
@@ -1601,6 +1603,12 @@ select:focus-visible {
 
 .report-section td {
   color: #344441;
+}
+
+.report-section td.report-status-complete {
+  background: #e4f5ea;
+  color: #246b4f;
+  font-weight: 800;
 }
 
 .report-footer {

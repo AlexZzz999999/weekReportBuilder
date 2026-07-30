@@ -360,6 +360,7 @@ function buildReportHtml(
   weekStart: string,
   weekEnd: string,
   sections: ReportSection[],
+  statusOptions: StatusOption[],
 ) {
   const sectionHtml = sections
     .map(
@@ -383,14 +384,23 @@ function buildReportHtml(
                   .map(
                     (row) =>
                       `<tr>${section.columns
-                        .map(
-                          (column) =>
-                            `<td style="padding:9px 8px;border:1px solid #dfe5e2;color:#273634;vertical-align:top">${escapeHtml(
-                              column.type === "date"
-                                ? formatDate(row[column.id] || "")
-                                : row[column.id] || "—",
-                            )}</td>`,
-                        )
+                        .map((column) => {
+                          const value =
+                            column.type === "date"
+                              ? formatDate(row[column.id] || "")
+                              : row[column.id] || "—";
+                          const isCompleted =
+                            column.type === "status" &&
+                            statusOptions.find(
+                              (option) => option.label === row[column.id],
+                            )?.tone === "done";
+                          const completedStyle = isCompleted
+                            ? "background:#e4f5ea;color:#246b4f;font-weight:700;"
+                            : "color:#273634;";
+                          return `<td style="padding:9px 8px;border:1px solid #dfe5e2;${completedStyle}vertical-align:top">${escapeHtml(
+                            value,
+                          )}</td>`;
+                        })
                         .join("")}</tr>`,
                   )
                   .join("")
@@ -1064,7 +1074,13 @@ export default function Home() {
   };
 
   const copyReport = async () => {
-    const html = buildReportHtml(reportTitle, weekStart, weekEnd, sections);
+    const html = buildReportHtml(
+      reportTitle,
+      weekStart,
+      weekEnd,
+      sections,
+      statusOptions,
+    );
     const text = buildPlainText(reportTitle, weekStart, weekEnd, sections);
     try {
       if ("ClipboardItem" in window && navigator.clipboard.write) {
@@ -2020,7 +2036,15 @@ export default function Home() {
                           section.rows.map((row) => (
                             <tr key={row.id}>
                               {section.columns.map((column) => (
-                                <td key={column.id}>
+                                <td
+                                  key={column.id}
+                                  className={
+                                    column.type === "status" &&
+                                    statusToneByLabel.get(row[column.id]) === "done"
+                                      ? "report-status-complete"
+                                      : undefined
+                                  }
+                                >
                                   {column.type === "date"
                                     ? formatDate(row[column.id] || "")
                                     : row[column.id] || "—"}
