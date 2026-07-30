@@ -1606,7 +1606,7 @@ select:focus-visible {
 }
 
 .report-section tr.report-row-complete td {
-  background: #e4f5ea;
+  background: #e4f5ea !important;
 }
 
 .report-section td.report-status-complete {

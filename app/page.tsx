@@ -341,10 +341,18 @@ function formatDate(date: string) {
 
 function getStatusClass(status: string, options: StatusOption[]) {
   const tone = options.find((option) => option.label === status)?.tone;
-  if (tone === "done") return "status-done";
+  if (isCompletedStatus(status, options)) return "status-done";
   if (tone === "cancelled") return "status-risk";
   if (tone === "active") return "status-active";
   return "status-neutral";
+}
+
+function isCompletedStatus(status: string, options: StatusOption[]) {
+  return (
+    status === "已完成" ||
+    status === "已全网" ||
+    options.find((option) => option.label === status)?.tone === "done"
+  );
 }
 
 function escapeHtml(value: string) {
@@ -385,9 +393,7 @@ function buildReportHtml(
                     const isCompletedRow = section.columns.some(
                       (column) =>
                         column.type === "status" &&
-                        statusOptions.find(
-                          (option) => option.label === row[column.id],
-                        )?.tone === "done",
+                        isCompletedStatus(row[column.id], statusOptions),
                     );
                     return `<tr>${section.columns
                         .map((column) => {
@@ -397,9 +403,7 @@ function buildReportHtml(
                               : row[column.id] || "—";
                           const isCompleted =
                             column.type === "status" &&
-                            statusOptions.find(
-                              (option) => option.label === row[column.id],
-                            )?.tone === "done";
+                            isCompletedStatus(row[column.id], statusOptions);
                           const rowStyle = isCompletedRow
                             ? "background:#e4f5ea;"
                             : "";
@@ -502,7 +506,7 @@ export default function Home() {
   const completedItems = sections.reduce(
     (total, section) =>
       total +
-      section.rows.filter((row) => statusToneByLabel.get(row.status) === "done")
+      section.rows.filter((row) => isCompletedStatus(row.status, statusOptions))
         .length,
     0,
   );
@@ -2046,7 +2050,10 @@ export default function Home() {
                             const isCompletedRow = section.columns.some(
                               (column) =>
                                 column.type === "status" &&
-                                statusToneByLabel.get(row[column.id]) === "done",
+                                isCompletedStatus(
+                                  row[column.id],
+                                  statusOptions,
+                                ),
                             );
                             return (
                             <tr
@@ -2058,9 +2065,17 @@ export default function Home() {
                               {section.columns.map((column) => (
                                 <td
                                   key={column.id}
+                                  style={
+                                    isCompletedRow
+                                      ? { backgroundColor: "#e4f5ea" }
+                                      : undefined
+                                  }
                                   className={
                                     column.type === "status" &&
-                                    statusToneByLabel.get(row[column.id]) === "done"
+                                    isCompletedStatus(
+                                      row[column.id],
+                                      statusOptions,
+                                    )
                                       ? "report-status-complete"
                                       : undefined
                                   }
