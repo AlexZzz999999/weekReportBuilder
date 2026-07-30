@@ -47,6 +47,9 @@ test("ships finished metadata and removes the starter preview", async () => {
 
   assert.match(page, /localStorage/);
   assert.match(page, /自定义列/);
+  assert.match(page, /管理周报表格/);
+  assert.match(page, /const addSection/);
+  assert.match(page, /const removeSection/);
   assert.match(page, /ClipboardItem/);
   assert.match(layout, /openGraph/);
   assert.doesNotMatch(layout, /Starter Project|codex-preview/);

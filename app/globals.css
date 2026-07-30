@@ -102,17 +102,43 @@ select:focus-visible {
   text-transform: uppercase;
 }
 
+.sidebar-label-row {
+  min-height: 24px;
+  margin: 0 8px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .sidebar-label {
-  margin: 0 8px 12px;
   color: rgba(255, 255, 255, 0.42);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.18em;
 }
 
+.manage-sections-button {
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.manage-sections-button:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
 .section-nav {
   display: grid;
   gap: 8px;
+  max-height: calc(100vh - 300px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
 }
 
 .section-nav-item {
@@ -761,6 +787,10 @@ select:focus-visible {
   box-shadow: 0 28px 90px rgba(10, 28, 26, 0.28);
 }
 
+.section-modal {
+  width: min(920px, 100%);
+}
+
 .modal-heading {
   position: sticky;
   top: 0;
@@ -805,6 +835,196 @@ select:focus-visible {
 .column-list {
   padding: 18px 27px 8px;
   display: grid;
+  gap: 8px;
+}
+
+.section-manager-list {
+  padding: 20px 27px 6px;
+  display: grid;
+  gap: 12px;
+}
+
+.section-manager-item {
+  padding: 14px;
+  border: 1px solid #dfe5e2;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.section-manager-top {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 11px;
+}
+
+.section-manager-index {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.section-name-fields {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 0.55fr);
+  gap: 8px;
+}
+
+.section-name-fields label > span,
+.section-description-field > span,
+.section-color-field > span {
+  display: block;
+  margin: 0 0 5px 2px;
+  color: #87928f;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.section-name-fields input,
+.section-description-field input,
+.new-section-fields input {
+  width: 100%;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #dbe1de;
+  border-radius: 8px;
+  background: #fafbf9;
+  color: #40504d;
+  font-size: 10px;
+}
+
+.section-order-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.section-order-actions button {
+  height: 34px;
+  padding: 0 9px;
+  border: 1px solid #dce2df;
+  border-radius: 8px;
+  background: #fff;
+  color: #65736f;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.section-order-actions button:disabled {
+  opacity: 0.28;
+  cursor: not-allowed;
+}
+
+.section-order-actions .section-delete {
+  color: #c45d54;
+}
+
+.section-order-actions .section-delete:hover {
+  border-color: #f0cac5;
+  background: #fff2ef;
+}
+
+.section-description-field {
+  display: block;
+  margin-top: 10px;
+}
+
+.section-color-field {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 66px minmax(0, 1fr);
+  align-items: center;
+}
+
+.section-color-field > span {
+  margin: 0;
+}
+
+.color-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.color-options > button {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px #d6ddda;
+}
+
+.color-options > button.is-selected {
+  box-shadow:
+    0 0 0 2px #fff,
+    0 0 0 4px #173c3b;
+}
+
+.custom-color {
+  height: 26px;
+  padding: 0 8px 0 4px;
+  border: 1px solid #dbe1de;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #75817e;
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.custom-color input {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.new-section-form {
+  margin: 16px 27px 27px;
+  padding: 18px;
+  border-radius: 14px;
+  background: #f1f4f0;
+}
+
+.new-section-heading {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.new-section-heading strong,
+.new-section-heading span {
+  display: block;
+}
+
+.new-section-heading strong {
+  color: #394946;
+  font-size: 11px;
+}
+
+.new-section-heading span {
+  margin-top: 3px;
+  color: #8b9693;
+  font-size: 8px;
+}
+
+.new-section-fields {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.8fr) minmax(200px, 1.4fr) auto;
   gap: 8px;
 }
 
@@ -1151,8 +1371,24 @@ select:focus-visible {
     display: none;
   }
 
+  .sidebar-label-row {
+    position: absolute;
+    top: 20px;
+    right: 16px;
+    min-height: 36px;
+    margin: 0;
+  }
+
+  .manage-sections-button {
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.08);
+  }
+
   .section-nav {
-    grid-template-columns: repeat(4, minmax(104px, 1fr));
+    max-height: none;
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(104px, 1fr);
     overflow-x: auto;
     padding-bottom: 3px;
   }
@@ -1254,6 +1490,56 @@ select:focus-visible {
 
   .column-item {
     grid-template-columns: 28px minmax(110px, 1fr) 92px 30px;
+  }
+
+  .section-manager-list {
+    padding: 14px 14px 4px;
+  }
+
+  .section-manager-item {
+    padding: 11px;
+  }
+
+  .section-manager-top {
+    grid-template-columns: 34px minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .section-manager-index {
+    width: 34px;
+    height: 34px;
+  }
+
+  .section-name-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .section-order-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+
+  .section-description-field {
+    margin-top: 8px;
+  }
+
+  .section-color-field {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .new-section-form {
+    margin: 14px;
+    padding: 14px;
+  }
+
+  .new-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .new-section-fields {
+    grid-template-columns: 1fr;
   }
 
   .column-move-actions {

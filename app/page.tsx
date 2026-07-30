@@ -28,11 +28,35 @@ type ReportSection = {
 
 const STORAGE_KEY = "weekly-report-workshop-v1";
 const STATUS_OPTIONS = ["未开始", "进行中", "已完成", "有风险", "已延期", "待确认"];
+const SECTION_COLOR_PRESETS = [
+  "#e96d62",
+  "#4e78d1",
+  "#e6a23c",
+  "#8567b9",
+  "#3f9d82",
+  "#c56c9a",
+  "#60758a",
+  "#b77942",
+];
 
 const makeId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+function createTint(hex: string) {
+  const normalized = hex.replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) return "#f3f5f4";
+  const channels = [0, 2, 4].map((offset) =>
+    Number.parseInt(normalized.slice(offset, offset + 2), 16),
+  );
+  const tinted = channels.map((channel) =>
+    Math.round(channel * 0.12 + 255 * 0.88)
+      .toString(16)
+      .padStart(2, "0"),
+  );
+  return `#${tinted.join("")}`;
+}
 
 const cloneInitialSections = (): ReportSection[] => [
   {
@@ -306,9 +330,13 @@ export default function Home() {
   const [weekStart, setWeekStart] = useState(initialWeek.start);
   const [weekEnd, setWeekEnd] = useState(initialWeek.end);
   const [isColumnManagerOpen, setIsColumnManagerOpen] = useState(false);
+  const [isSectionManagerOpen, setIsSectionManagerOpen] = useState(false);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [newColumnName, setNewColumnName] = useState("");
   const [newColumnType, setNewColumnType] = useState<ColumnType>("text");
+  const [newSectionName, setNewSectionName] = useState("");
+  const [newSectionDescription, setNewSectionDescription] = useState("");
+  const [newSectionColor, setNewSectionColor] = useState("#3f9d82");
   const [toast, setToast] = useState("");
   const [isReady, setIsReady] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -498,6 +526,83 @@ export default function Home() {
     );
   };
 
+  const updateSection = (
+    sectionId: string,
+    updates: Partial<
+      Pick<ReportSection, "title" | "shortTitle" | "description" | "color" | "tint">
+    >,
+  ) => {
+    setSections((current) =>
+      current.map((section) =>
+        section.id === sectionId ? { ...section, ...updates } : section,
+      ),
+    );
+  };
+
+  const updateSectionColor = (sectionId: string, color: string) => {
+    updateSection(sectionId, { color, tint: createTint(color) });
+  };
+
+  const moveSection = (sectionId: string, direction: -1 | 1) => {
+    setSections((current) => {
+      const index = current.findIndex((section) => section.id === sectionId);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  };
+
+  const addSection = () => {
+    const title = newSectionName.trim();
+    if (!title) {
+      showToast("请先填写表格名称");
+      return;
+    }
+    const id = `section-${makeId()}`;
+    const section: ReportSection = {
+      id,
+      title,
+      shortTitle: title,
+      description:
+        newSectionDescription.trim() || `记录本周${title}相关事项与工作进展`,
+      color: newSectionColor,
+      tint: createTint(newSectionColor),
+      columns: [
+        { id: "no", label: "编号", type: "text" },
+        { id: "summary", label: "事项简述", type: "longtext" },
+        { id: "owner", label: "负责人", type: "text" },
+        { id: "planAt", label: "计划完成", type: "date" },
+        { id: "status", label: "状态", type: "status" },
+      ],
+      rows: [],
+    };
+    setSections((current) => [...current, section]);
+    setActiveSectionId(id);
+    setNewSectionName("");
+    setNewSectionDescription("");
+    setNewSectionColor("#3f9d82");
+    showToast(`已新增“${title}”表格`);
+  };
+
+  const removeSection = (sectionId: string) => {
+    if (sections.length <= 1) {
+      showToast("至少需要保留一张表格");
+      return;
+    }
+    const target = sections.find((section) => section.id === sectionId);
+    if (!target) return;
+    const detail = target.rows.length
+      ? `其中 ${target.rows.length} 条数据也会一并删除。`
+      : "";
+    if (!window.confirm(`确定删除“${target.title}”吗？${detail}`)) return;
+    const remaining = sections.filter((section) => section.id !== sectionId);
+    setSections(remaining);
+    if (activeSectionId === sectionId) setActiveSectionId(remaining[0].id);
+    showToast(`已删除“${target.title}”`);
+  };
+
   const restoreExamples = () => {
     if (!window.confirm("恢复示例数据会覆盖当前编辑内容，确定继续吗？")) return;
     setSections(cloneInitialSections());
@@ -541,7 +646,16 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="sidebar-label">本周内容</div>
+        <div className="sidebar-label-row">
+          <div className="sidebar-label">本周内容</div>
+          <button
+            className="manage-sections-button"
+            onClick={() => setIsSectionManagerOpen(true)}
+            aria-label="管理周报表格"
+          >
+            管理
+          </button>
+        </div>
         <nav className="section-nav" aria-label="周报分类">
           {sections.map((section, index) => (
             <button
@@ -557,7 +671,9 @@ export default function Home() {
                 } as React.CSSProperties
               }
             >
-              <span className="section-index">0{index + 1}</span>
+              <span className="section-index">
+                {String(index + 1).padStart(2, "0")}
+              </span>
               <span className="section-nav-copy">
                 <strong>{section.shortTitle}</strong>
                 <small>{section.rows.length} 条记录</small>
@@ -663,7 +779,9 @@ export default function Home() {
           <div className="editor-heading">
             <div className="editor-title-group">
               <span className="section-number">
-                0{sections.findIndex((section) => section.id === activeSection.id) + 1}
+                {String(
+                  sections.findIndex((section) => section.id === activeSection.id) + 1,
+                ).padStart(2, "0")}
               </span>
               <div>
                 <div className="title-line">
@@ -674,6 +792,13 @@ export default function Home() {
               </div>
             </div>
             <div className="editor-actions">
+              <button
+                className="secondary-button"
+                onClick={() => setIsSectionManagerOpen(true)}
+                data-testid="manage-sections"
+              >
+                管理表格
+              </button>
               <button
                 className="secondary-button"
                 onClick={() => setIsColumnManagerOpen(true)}
@@ -795,6 +920,191 @@ export default function Home() {
           </div>
         </section>
       </main>
+
+      {isSectionManagerOpen && (
+        <div
+          className="modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIsSectionManagerOpen(false);
+          }}
+        >
+          <section
+            className="column-modal section-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="section-modal-title"
+          >
+            <div className="modal-heading">
+              <div>
+                <span className="eyebrow">REPORT STRUCTURE</span>
+                <h2 id="section-modal-title">管理周报表格</h2>
+                <p>新增、重命名、排序或删除周报中的整张表格。</p>
+              </div>
+              <button
+                className="modal-close"
+                aria-label="关闭"
+                onClick={() => setIsSectionManagerOpen(false)}
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="section-manager-list">
+              {sections.map((section, index) => (
+                <div className="section-manager-item" key={section.id}>
+                  <div className="section-manager-top">
+                    <span
+                      className="section-manager-index"
+                      style={{ background: section.color }}
+                    >
+                      {String(index + 1).padStart(2, "0")}
+                    </span>
+                    <div className="section-name-fields">
+                      <label>
+                        <span>表格名称</span>
+                        <input
+                          value={section.title}
+                          onChange={(event) =>
+                            updateSection(section.id, { title: event.target.value })
+                          }
+                          onBlur={(event) => {
+                            if (!event.target.value.trim()) {
+                              updateSection(section.id, { title: "未命名表格" });
+                            }
+                          }}
+                        />
+                      </label>
+                      <label>
+                        <span>侧栏简称</span>
+                        <input
+                          value={section.shortTitle}
+                          onChange={(event) =>
+                            updateSection(section.id, {
+                              shortTitle: event.target.value,
+                            })
+                          }
+                          onBlur={(event) => {
+                            if (!event.target.value.trim()) {
+                              updateSection(section.id, {
+                                shortTitle: section.title || "未命名",
+                              });
+                            }
+                          }}
+                        />
+                      </label>
+                    </div>
+                    <div className="section-order-actions">
+                      <button
+                        aria-label={`向前移动${section.title}`}
+                        disabled={index === 0}
+                        onClick={() => moveSection(section.id, -1)}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        aria-label={`向后移动${section.title}`}
+                        disabled={index === sections.length - 1}
+                        onClick={() => moveSection(section.id, 1)}
+                      >
+                        ↓
+                      </button>
+                      <button
+                        className="section-delete"
+                        aria-label={`删除${section.title}`}
+                        onClick={() => removeSection(section.id)}
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                  <label className="section-description-field">
+                    <span>表格说明</span>
+                    <input
+                      value={section.description}
+                      placeholder="说明这张表用于记录什么"
+                      onChange={(event) =>
+                        updateSection(section.id, {
+                          description: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+                  <div className="section-color-field">
+                    <span>标题颜色</span>
+                    <div className="color-options">
+                      {SECTION_COLOR_PRESETS.map((color) => (
+                        <button
+                          key={color}
+                          className={section.color === color ? "is-selected" : ""}
+                          style={{ background: color }}
+                          aria-label={`选择颜色${color}`}
+                          aria-pressed={section.color === color}
+                          onClick={() => updateSectionColor(section.id, color)}
+                        />
+                      ))}
+                      <label className="custom-color">
+                        <input
+                          type="color"
+                          value={section.color}
+                          onChange={(event) =>
+                            updateSectionColor(section.id, event.target.value)
+                          }
+                        />
+                        <span>自定义</span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="new-section-form">
+              <div className="new-section-heading">
+                <div>
+                  <strong>新增一张表格</strong>
+                  <span>默认包含编号、事项、负责人、完成日期和状态</span>
+                </div>
+                <div className="color-options">
+                  {SECTION_COLOR_PRESETS.slice(0, 6).map((color) => (
+                    <button
+                      key={color}
+                      className={newSectionColor === color ? "is-selected" : ""}
+                      style={{ background: color }}
+                      aria-label={`选择新表格颜色${color}`}
+                      aria-pressed={newSectionColor === color}
+                      onClick={() => setNewSectionColor(color)}
+                    />
+                  ))}
+                </div>
+              </div>
+              <div className="new-section-fields">
+                <input
+                  aria-label="新表格名称"
+                  placeholder="表格名称，例如：质量专项"
+                  value={newSectionName}
+                  onChange={(event) => setNewSectionName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") addSection();
+                  }}
+                />
+                <input
+                  aria-label="新表格说明"
+                  placeholder="用途说明（可选）"
+                  value={newSectionDescription}
+                  onChange={(event) => setNewSectionDescription(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") addSection();
+                  }}
+                />
+                <button className="add-row-button" onClick={addSection}>
+                  ＋ 新增表格
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
 
       {isColumnManagerOpen && (
         <div
@@ -961,7 +1271,7 @@ export default function Home() {
                   }
                 >
                   <div className="report-section-heading">
-                    <span>0{index + 1}</span>
+                    <span>{String(index + 1).padStart(2, "0")}</span>
                     <h2>{section.title}</h2>
                     <small>{section.rows.length} 项</small>
                   </div>
