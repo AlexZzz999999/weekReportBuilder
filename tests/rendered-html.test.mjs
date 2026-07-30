@@ -39,9 +39,10 @@ test("server-renders the weekly report editor shell", async () => {
 });
 
 test("ships finished metadata and removes the starter preview", async () => {
-  const [page, layout, packageJson] = await Promise.all([
+  const [page, layout, styles, packageJson] = await Promise.all([
     readFile(new URL("app/page.tsx", root), "utf8"),
     readFile(new URL("app/layout.tsx", root), "utf8"),
+    readFile(new URL("app/globals.css", root), "utf8"),
     readFile(new URL("package.json", root), "utf8"),
   ]);
 
@@ -59,6 +60,7 @@ test("ships finished metadata and removes the starter preview", async () => {
   assert.match(page, /const removeSection/);
   assert.match(page, /ClipboardItem/);
   assert.match(layout, /openGraph/);
+  assert.match(styles, /"Times New Roman", "Microsoft YaHei", "微软雅黑"/);
   assert.doesNotMatch(layout, /Starter Project|codex-preview/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(packageJson, /WRANGLER_LOG_PATH/);
