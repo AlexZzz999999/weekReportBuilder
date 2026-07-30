@@ -62,5 +62,6 @@ test("ships finished metadata and removes the starter preview", async () => {
   assert.doesNotMatch(layout, /Starter Project|codex-preview/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   assert.doesNotMatch(packageJson, /WRANGLER_LOG_PATH/);
+  assert.match(packageJson, /"dev": "next dev"/);
   await assert.rejects(access(new URL("app/_sites-preview", root)));
 });
