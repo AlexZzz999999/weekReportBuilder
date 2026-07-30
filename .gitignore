@@ -40,3 +40,6 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# Local weekly-report content selected by the user at runtime
+/周报工坊数据.json

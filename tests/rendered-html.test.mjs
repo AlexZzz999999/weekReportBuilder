@@ -45,7 +45,14 @@ test("ships finished metadata and removes the starter preview", async () => {
     readFile(new URL("package.json", root), "utf8"),
   ]);
 
-  assert.match(page, /localStorage/);
+  assert.match(page, /showDirectoryPicker/);
+  assert.match(page, /indexedDB/);
+  assert.match(page, /周报工坊数据\.json/);
+  assert.match(page, /使用前，请先选择数据目录/);
+  assert.match(page, /工作进展概览/);
+  assert.match(page, /整体完成率/);
+  assert.doesNotMatch(page, /把进展讲清楚/);
+  assert.doesNotMatch(page, /把时间留给工作/);
   assert.match(page, /自定义列/);
   assert.match(page, /管理周报表格/);
   assert.match(page, /const addSection/);

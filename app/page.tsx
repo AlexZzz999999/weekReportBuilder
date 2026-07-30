@@ -26,7 +26,37 @@ type ReportSection = {
   rows: ReportRow[];
 };
 
-const STORAGE_KEY = "weekly-report-workshop-v1";
+type PersistedReportData = {
+  version: 2;
+  reportTitle: string;
+  weekStart: string;
+  weekEnd: string;
+  sections: ReportSection[];
+  updatedAt: string;
+};
+
+type DirectoryHandle = FileSystemDirectoryHandle & {
+  queryPermission(options?: {
+    mode?: "read" | "readwrite";
+  }): Promise<PermissionState>;
+  requestPermission(options?: {
+    mode?: "read" | "readwrite";
+  }): Promise<PermissionState>;
+};
+
+type DirectoryPickerWindow = Window & {
+  showDirectoryPicker?: (options?: {
+    id?: string;
+    mode?: "read" | "readwrite";
+    startIn?: FileSystemHandle;
+  }) => Promise<DirectoryHandle>;
+};
+
+const LEGACY_STORAGE_KEY = "weekly-report-workshop-v1";
+const DATA_FILE_NAME = "周报工坊数据.json";
+const DIRECTORY_DB_NAME = "weekly-report-workshop-directory";
+const DIRECTORY_STORE_NAME = "handles";
+const DIRECTORY_HANDLE_KEY = "report-data-directory";
 const STATUS_OPTIONS = ["未开始", "进行中", "已完成", "有风险", "已延期", "待确认"];
 const SECTION_COLOR_PRESETS = [
   "#e96d62",
@@ -56,6 +86,89 @@ function createTint(hex: string) {
       .padStart(2, "0"),
   );
   return `#${tinted.join("")}`;
+}
+
+function openDirectoryDatabase() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open(DIRECTORY_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(DIRECTORY_STORE_NAME)) {
+        database.createObjectStore(DIRECTORY_STORE_NAME);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function loadSavedDirectoryHandle() {
+  const database = await openDirectoryDatabase();
+  return new Promise<DirectoryHandle | null>((resolve, reject) => {
+    const transaction = database.transaction(DIRECTORY_STORE_NAME, "readonly");
+    const request = transaction
+      .objectStore(DIRECTORY_STORE_NAME)
+      .get(DIRECTORY_HANDLE_KEY);
+    request.onsuccess = () =>
+      resolve((request.result as DirectoryHandle | undefined) || null);
+    request.onerror = () => reject(request.error);
+    transaction.oncomplete = () => database.close();
+  });
+}
+
+async function saveDirectoryHandle(handle: DirectoryHandle) {
+  const database = await openDirectoryDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(DIRECTORY_STORE_NAME, "readwrite");
+    transaction.objectStore(DIRECTORY_STORE_NAME).put(handle, DIRECTORY_HANDLE_KEY);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+  database.close();
+}
+
+function isPersistedReportData(value: unknown): value is PersistedReportData {
+  if (!value || typeof value !== "object") return false;
+  const data = value as Partial<PersistedReportData>;
+  return (
+    typeof data.reportTitle === "string" &&
+    typeof data.weekStart === "string" &&
+    typeof data.weekEnd === "string" &&
+    Array.isArray(data.sections)
+  );
+}
+
+async function readReportData(handle: DirectoryHandle) {
+  const fileHandle = await handle.getFileHandle(DATA_FILE_NAME, { create: true });
+  const file = await fileHandle.getFile();
+  const text = await file.text();
+  if (!text.trim()) return null;
+  const parsed: unknown = JSON.parse(text);
+  if (!isPersistedReportData(parsed)) {
+    throw new Error("所选目录中的周报数据文件格式无法识别");
+  }
+  return parsed;
+}
+
+async function writeReportData(
+  handle: DirectoryHandle,
+  data: Omit<PersistedReportData, "version" | "updatedAt">,
+) {
+  const fileHandle = await handle.getFileHandle(DATA_FILE_NAME, { create: true });
+  const writable = await fileHandle.createWritable();
+  await writable.write(
+    JSON.stringify(
+      {
+        ...data,
+        version: 2,
+        updatedAt: new Date().toISOString(),
+      } satisfies PersistedReportData,
+      null,
+      2,
+    ),
+  );
+  await writable.close();
 }
 
 const cloneInitialSections = (): ReportSection[] => [
@@ -339,7 +452,20 @@ export default function Home() {
   const [newSectionColor, setNewSectionColor] = useState("#3f9d82");
   const [toast, setToast] = useState("");
   const [isReady, setIsReady] = useState(false);
+  const [directoryHandle, setDirectoryHandle] = useState<DirectoryHandle | null>(
+    null,
+  );
+  const [directoryName, setDirectoryName] = useState("");
+  const [isDirectoryGateOpen, setIsDirectoryGateOpen] = useState(true);
+  const [directoryStatus, setDirectoryStatus] = useState<
+    "checking" | "required" | "connecting" | "connected" | "unsupported" | "error"
+  >("checking");
+  const [directoryError, setDirectoryError] = useState("");
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">(
+    "idle",
+  );
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const activeSection =
     sections.find((section) => section.id === activeSectionId) || sections[0];
@@ -358,6 +484,14 @@ export default function Home() {
       ).length,
     0,
   );
+  const inProgressItems = sections.reduce(
+    (total, section) =>
+      total + section.rows.filter((row) => row.status === "进行中").length,
+    0,
+  );
+  const completionRate = totalItems
+    ? Math.round((completedItems / totalItems) * 100)
+    : 0;
 
   const showToast = (message: string) => {
     setToast(message);
@@ -365,34 +499,160 @@ export default function Home() {
     toastTimer.current = setTimeout(() => setToast(""), 2400);
   };
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.sections) setSections(parsed.sections);
-        if (parsed.reportTitle) setReportTitle(parsed.reportTitle);
-        if (parsed.weekStart) setWeekStart(parsed.weekStart);
-        if (parsed.weekEnd) setWeekEnd(parsed.weekEnd);
-      }
-    } catch {
-      // Invalid local data should never block the editor.
-    } finally {
-      setIsReady(true);
+  const applyLoadedReport = (data: PersistedReportData) => {
+    setSections(data.sections);
+    setReportTitle(data.reportTitle);
+    setWeekStart(data.weekStart);
+    setWeekEnd(data.weekEnd);
+    if (!data.sections.some((section) => section.id === activeSectionId)) {
+      setActiveSectionId(data.sections[0]?.id || "");
     }
+  };
+
+  const currentReportData = () => ({
+    sections,
+    reportTitle,
+    weekStart,
+    weekEnd,
+  });
+
+  const connectDirectory = async (reuseSavedHandle: boolean) => {
+    const wasConnected = directoryStatus === "connected";
+    setDirectoryStatus("connecting");
+    setDirectoryError("");
+
+    try {
+      let nextHandle = reuseSavedHandle ? directoryHandle : null;
+      if (!nextHandle) {
+        const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
+        if (!picker) throw new Error("当前浏览器不支持选择电脑目录");
+        nextHandle = await picker({
+          id: "weekly-report-workshop",
+          mode: "readwrite",
+          startIn: directoryHandle || undefined,
+        });
+      }
+
+      if (!reuseSavedHandle && wasConnected && directoryHandle) {
+        await writeReportData(directoryHandle, currentReportData());
+      }
+
+      let permission = await nextHandle.queryPermission({ mode: "readwrite" });
+      if (permission !== "granted") {
+        permission = await nextHandle.requestPermission({ mode: "readwrite" });
+      }
+      if (permission !== "granted") {
+        throw new Error("未获得该目录的读写权限");
+      }
+
+      let data = await readReportData(nextHandle);
+      if (!data) {
+        let initialData = currentReportData();
+        const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+        if (legacy) {
+          try {
+            const parsed: unknown = JSON.parse(legacy);
+            if (isPersistedReportData(parsed)) {
+              initialData = {
+                sections: parsed.sections,
+                reportTitle: parsed.reportTitle,
+                weekStart: parsed.weekStart,
+                weekEnd: parsed.weekEnd,
+              };
+            }
+          } catch {
+            // Keep the current defaults if legacy browser data is damaged.
+          }
+        }
+        await writeReportData(nextHandle, initialData);
+        data = {
+          ...initialData,
+          version: 2,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      await saveDirectoryHandle(nextHandle);
+      applyLoadedReport(data);
+      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      setDirectoryHandle(nextHandle);
+      setDirectoryName(nextHandle.name);
+      setDirectoryStatus("connected");
+      setSaveStatus("saved");
+      setIsReady(true);
+      setIsDirectoryGateOpen(false);
+      showToast(`已连接数据目录“${nextHandle.name}”`);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setDirectoryStatus(wasConnected ? "connected" : "required");
+        if (wasConnected) setIsDirectoryGateOpen(false);
+        return;
+      }
+      setDirectoryStatus("error");
+      setDirectoryError(
+        error instanceof Error ? error.message : "目录连接失败，请重新选择",
+      );
+      setIsDirectoryGateOpen(true);
+    }
+  };
+
+  useEffect(() => {
+    const prepareDirectoryGate = async () => {
+      if (!window.isSecureContext) {
+        setDirectoryStatus("unsupported");
+        setDirectoryError("目录访问需要通过 HTTPS 或 localhost 打开此工具");
+        return;
+      }
+      if (
+        typeof (window as DirectoryPickerWindow).showDirectoryPicker !== "function"
+      ) {
+        setDirectoryStatus("unsupported");
+        setDirectoryError("当前浏览器不支持目录访问，请使用 Chrome 或 Edge");
+        return;
+      }
+      try {
+        const savedHandle = await loadSavedDirectoryHandle();
+        if (savedHandle) {
+          setDirectoryHandle(savedHandle);
+          setDirectoryName(savedHandle.name);
+        }
+        setDirectoryStatus("required");
+      } catch {
+        setDirectoryStatus("required");
+      }
+    };
+    void prepareDirectoryGate();
   }, []);
 
   useEffect(() => {
-    if (!isReady) return;
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({ sections, reportTitle, weekStart, weekEnd }),
-    );
-  }, [sections, reportTitle, weekStart, weekEnd, isReady]);
+    if (!isReady || directoryStatus !== "connected" || !directoryHandle) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSaveStatus("saving");
+    saveTimer.current = setTimeout(() => {
+      void writeReportData(directoryHandle, currentReportData())
+        .then(() => setSaveStatus("saved"))
+        .catch(() => {
+          setSaveStatus("error");
+          showToast("保存失败，请检查目录权限");
+        });
+    }, 650);
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, [
+    sections,
+    reportTitle,
+    weekStart,
+    weekEnd,
+    isReady,
+    directoryHandle,
+    directoryStatus,
+  ]);
 
   useEffect(
     () => () => {
       if (toastTimer.current) clearTimeout(toastTimer.current);
+      if (saveTimer.current) clearTimeout(saveTimer.current);
     },
     [],
   );
@@ -686,10 +946,10 @@ export default function Home() {
         </nav>
 
         <div className="sidebar-note">
-          <span className="sidebar-note-icon">✓</span>
+          <span className="sidebar-note-icon">⌂</span>
           <div>
-            <strong>实时自动保存</strong>
-            <p>修改内容会保存在当前浏览器中</p>
+            <strong>{directoryName || "等待选择目录"}</strong>
+            <p>数据写入电脑中的 {DATA_FILE_NAME}</p>
           </div>
         </div>
 
@@ -710,6 +970,19 @@ export default function Home() {
             />
           </div>
           <div className="topbar-actions">
+            <button
+              className="directory-entry"
+              onClick={() => setIsDirectoryGateOpen(true)}
+              disabled={directoryStatus !== "connected"}
+              title="查看或更换数据目录"
+            >
+              <span className="directory-entry-dot" aria-hidden="true" />
+              <span>
+                <small>数据目录</small>
+                <strong>{directoryName || "未连接"}</strong>
+              </span>
+              <i>更换</i>
+            </button>
             <div className="week-range" aria-label="周报日期范围">
               <label>
                 <span>开始</span>
@@ -742,27 +1015,50 @@ export default function Home() {
           </div>
         </header>
 
-        <section className="overview" aria-label="本周概览">
-          <div className="overview-intro">
-            <span className="overview-kicker">本周工作台</span>
-            <h1>把进展讲清楚，<br />把时间留给工作。</h1>
-            <p>选择左侧分类直接维护内容，完成后即可生成正式周报。</p>
+        <section className="progress-overview" aria-label="本周进展概览">
+          <div className="progress-overview-heading">
+            <span className="progress-overview-label">
+              <i aria-hidden="true" />
+              本周进展
+            </span>
+            <h1>工作进展概览</h1>
+            <p>
+              {formatDate(weekStart)} — {formatDate(weekEnd)}
+            </p>
           </div>
-          <div className="overview-stats">
-            <div className="stat-card">
+
+          <div className="progress-completion">
+            <div className="progress-completion-copy">
+              <span>整体完成率</span>
+              <strong>{completionRate}%</strong>
+            </div>
+            <div
+              className="progress-bar"
+              role="progressbar"
+              aria-label="整体完成率"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={completionRate}
+            >
+              <i style={{ width: `${completionRate}%` }} />
+            </div>
+            <small>
+              {completedItems} / {totalItems} 项已完成
+            </small>
+          </div>
+
+          <div className="progress-metrics">
+            <div className="progress-metric">
               <span>全部事项</span>
               <strong>{String(totalItems).padStart(2, "0")}</strong>
-              <small>本周已记录</small>
             </div>
-            <div className="stat-card">
-              <span>已完成</span>
-              <strong>{String(completedItems).padStart(2, "0")}</strong>
-              <small>完成率 {totalItems ? Math.round((completedItems / totalItems) * 100) : 0}%</small>
+            <div className="progress-metric progress-metric-active">
+              <span>进行中</span>
+              <strong>{String(inProgressItems).padStart(2, "0")}</strong>
             </div>
-            <div className="stat-card stat-card-risk">
+            <div className="progress-metric progress-metric-risk">
               <span>需关注</span>
               <strong>{String(riskItems).padStart(2, "0")}</strong>
-              <small>{riskItems ? "建议优先同步" : "当前进展平稳"}</small>
             </div>
           </div>
         </section>
@@ -913,13 +1209,124 @@ export default function Home() {
             </div>
             <div className="table-footer">
               <span>
-                <i className="save-dot" /> 已自动保存
+                <i className={`save-dot save-${saveStatus}`} />
+                {saveStatus === "saving"
+                  ? "正在写入数据文件…"
+                  : saveStatus === "error"
+                    ? "保存失败，请检查目录权限"
+                    : `已保存至 ${directoryName}/${DATA_FILE_NAME}`}
               </span>
               <span>横向滚动可查看全部列</span>
             </div>
           </div>
         </section>
       </main>
+
+      {isDirectoryGateOpen && (
+        <div className="directory-gate-backdrop">
+          <section
+            className="directory-gate"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="directory-gate-title"
+          >
+            <div className="directory-gate-mark" aria-hidden="true">
+              <span>⌂</span>
+            </div>
+            <span className="eyebrow">LOCAL DATA DIRECTORY</span>
+            <h2 id="directory-gate-title">
+              {directoryStatus === "connected"
+                ? "当前数据目录"
+                : "使用前，请先选择数据目录"}
+            </h2>
+            <p className="directory-gate-lead">
+              周报内容将直接保存在你选择的电脑目录中。未连接目录前，编辑功能不会开放。
+            </p>
+
+            <div className="directory-file-card">
+              <span className="directory-file-icon" aria-hidden="true">
+                JSON
+              </span>
+              <div>
+                <strong>{DATA_FILE_NAME}</strong>
+                <small>
+                  {directoryName
+                    ? `保存位置：${directoryName}`
+                    : "选择后将自动创建此数据文件"}
+                </small>
+              </div>
+              {directoryStatus === "connected" && <em>已连接</em>}
+            </div>
+
+            {directoryError && (
+              <div className="directory-error" role="alert">
+                <strong>暂时无法连接目录</strong>
+                <span>{directoryError}</span>
+              </div>
+            )}
+
+            <div className="directory-gate-actions">
+              {directoryStatus === "checking" ||
+              directoryStatus === "connecting" ? (
+                <button className="primary-button directory-primary" disabled>
+                  {directoryStatus === "checking"
+                    ? "正在检查目录能力…"
+                    : "正在连接并读取数据…"}
+                </button>
+              ) : directoryStatus === "unsupported" ? (
+                <div className="directory-browser-tip">
+                  请使用最新版 Chrome 或 Edge，并通过 HTTPS 或 localhost 访问。
+                </div>
+              ) : directoryStatus === "connected" ? (
+                <>
+                  <button
+                    className="secondary-button"
+                    onClick={() => void connectDirectory(false)}
+                  >
+                    选择其他目录
+                  </button>
+                  <button
+                    className="primary-button directory-primary"
+                    onClick={() => setIsDirectoryGateOpen(false)}
+                  >
+                    继续编辑
+                  </button>
+                </>
+              ) : directoryHandle ? (
+                <>
+                  <button
+                    className="secondary-button"
+                    onClick={() => void connectDirectory(false)}
+                  >
+                    选择其他目录
+                  </button>
+                  <button
+                    className="primary-button directory-primary"
+                    onClick={() => void connectDirectory(true)}
+                  >
+                    继续使用“{directoryName}”
+                  </button>
+                </>
+              ) : (
+                <button
+                  className="primary-button directory-primary"
+                  onClick={() => void connectDirectory(false)}
+                >
+                  选择电脑目录
+                  <span className="button-arrow" aria-hidden="true">
+                    →
+                  </span>
+                </button>
+              )}
+            </div>
+
+            <div className="directory-gate-footnote">
+              <span>✓ 周报正文不再保存在浏览器中</span>
+              <span>✓ 刷新页面后仍会要求确认目录</span>
+            </div>
+          </section>
+        </div>
+      )}
 
       {isSectionManagerOpen && (
         <div
